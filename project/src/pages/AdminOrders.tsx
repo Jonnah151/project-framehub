@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Package, Search, User } from 'lucide-react';
-import { supabase, Order, Profile, OrderStatus } from '../lib/supabase';
+import { supabase, Order, Profile, OrderStatus, Payment } from '../lib/supabase';
 import { Card, Badge, Spinner, EmptyState, Button, Select, statusColors, formatCurrency, formatDateTime } from '../components/ui';
 
 const statusSteps: OrderStatus[] = ['pending', 'processing', 'completed', 'delivered', 'cancelled'];
@@ -15,9 +15,17 @@ export default function AdminOrders() {
   const load = useCallback(async () => {
     const { data: ordersData } = await supabase.from('orders').select('*').order('created_at', { ascending: false });
     const userIds = [...new Set((ordersData ?? []).map((o) => o.user_id))];
-    const { data: profiles } = await supabase.from('profiles').select('id, full_name').in('id', userIds);
     const map: Record<string, string> = {};
-    (profiles as Profile[] | null)?.forEach((p) => { map[p.id] = p.full_name; });
+
+    try {
+      const { data: profiles, error: profilesError } = await supabase.from('profiles').select('id, full_name').in('id', userIds);
+      if (!profilesError) {
+        (profiles as Profile[] | null)?.forEach((p) => { map[p.id] = p.full_name; });
+      }
+    } catch {
+      // Ignore profile lookup failures so the order list remains usable.
+    }
+
     setOrders((ordersData ?? []).map((o) => ({ ...o, customer: map[o.user_id] ?? 'Unknown' })));
     setLoading(false);
   }, []);
@@ -103,18 +111,22 @@ function OrderManagePanel({ order, onUpdated }: { order: Order & { customer?: st
   const [status, setStatus] = useState<OrderStatus>(order.status);
   const [designer, setDesigner] = useState(order.assigned_designer ?? '');
   const [delivery, setDelivery] = useState(order.assigned_delivery ?? '');
+  const [payment, setPayment] = useState<Payment | null>(null);
   const [saving, setSaving] = useState(false);
+  const [approving, setApproving] = useState(false);
 
   useEffect(() => {
     (async () => {
-      const [{ data: d }, { data: dl }] = await Promise.all([
+      const [{ data: d }, { data: dl }, { data: paymentData }] = await Promise.all([
         supabase.from('profiles').select('*').eq('role', 'designer'),
         supabase.from('profiles').select('*').eq('role', 'delivery'),
+        supabase.from('payments').select('*').eq('reference_type', 'order').eq('reference_id', order.id).maybeSingle(),
       ]);
       setDesigners(d as Profile[] ?? []);
       setDeliveryStaff(dl as Profile[] ?? []);
+      setPayment(paymentData as Payment | null);
     })();
-  }, []);
+  }, [order.id]);
 
   const handleSave = async () => {
     setSaving(true);
@@ -127,6 +139,29 @@ function OrderManagePanel({ order, onUpdated }: { order: Order & { customer?: st
     onUpdated();
   };
 
+  const handleApprovePayment = async () => {
+    setApproving(true);
+    await supabase.from('payments').update({
+      status: 'paid',
+      updated_at: new Date().toISOString(),
+    }).eq('reference_type', 'order').eq('reference_id', order.id);
+    await supabase.from('orders').update({
+      status: 'processing',
+      updated_at: new Date().toISOString(),
+    }).eq('id', order.id);
+    await supabase.from('notifications').insert({
+      user_id: order.user_id,
+      title: 'Payment approved',
+      message: `Your payment for "${order.title}" was approved. Your order is now being processed.`,
+      type: 'payment',
+      meta: { order_id: order.id },
+    });
+    setPayment((prev) => prev ? { ...prev, status: 'paid' } : prev);
+    setStatus('processing');
+    setApproving(false);
+    onUpdated();
+  };
+
   return (
     <div className="mt-4 border-t border-slate-100 pt-4 space-y-3">
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -136,6 +171,17 @@ function OrderManagePanel({ order, onUpdated }: { order: Order & { customer?: st
           options={designers.map((d) => ({ value: d.id, label: d.full_name }))} />
         <Select label="Delivery" value={delivery} onChange={setDelivery} placeholder="Unassigned"
           options={deliveryStaff.map((d) => ({ value: d.id, label: d.full_name }))} />
+      </div>
+      <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+        <div className="flex items-center justify-between">
+          <span>Payment status: {payment?.status ?? 'none'}</span>
+          {payment?.status === 'pending' && (
+            <Button size="sm" variant="success" onClick={handleApprovePayment} disabled={approving}>
+              {approving ? 'Approving…' : 'Approve payment'}
+            </Button>
+          )}
+        </div>
+        {payment && <div className="mt-1 text-xs text-slate-500">Reference: {payment.transaction_id}</div>}
       </div>
       <div className="flex justify-end">
         <Button size="sm" onClick={handleSave} disabled={saving}>{saving ? 'Saving…' : 'Save changes'}</Button>

@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, type ChangeEvent } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import {
   Upload, File as FileIcon, Trash2, CreditCard, AlertCircle, ArrowLeft,
@@ -44,12 +44,12 @@ export default function OrderDetail() {
     loadData();
   }, [loadData]);
 
-  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleUpload = async (e: ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || !e.target.files.length || !profile || !order) return;
     setUploading(true);
     setError('');
     for (const file of Array.from(e.target.files)) {
-      const filePath = `${profile.id}/${order.id}/${Date.now()}-${file.name}`;
+      const filePath = `${profile.id}/${order.id}/${Date.now()}-${file.name.replace(/\s+/g, '-')}`;
       const { error: upErr } = await supabase.storage.from('order-files').upload(filePath, file);
       if (upErr) {
         setError(upErr.message);
@@ -78,38 +78,42 @@ export default function OrderDetail() {
   const handlePay = async () => {
     if (!order || !profile) return;
     if (!paymentRef.trim()) {
-      setError('Enter your payment number to proceed.');
+      setError('Enter your payment reference to proceed.');
       return;
     }
     setError('');
     setPaying(true);
-    const { data, error: payErr } = await supabase
-      .from('payments')
-      .insert({
-        user_id: profile.id,
-        reference_type: 'order',
-        reference_id: order.id,
-        amount: order.total_amount,
-        status: 'paid',
-        method: 'mobile_money',
-        transaction_id: paymentRef.trim(),
-      })
-      .select()
-      .single();
+    const payload = {
+      user_id: profile.id,
+      reference_type: 'order' as const,
+      reference_id: order.id,
+      amount: order.total_amount,
+      status: 'pending' as const,
+      method: 'mobile_money',
+      transaction_id: paymentRef.trim(),
+      updated_at: new Date().toISOString(),
+    };
+
+    let paymentResult;
+    if (payment) {
+      paymentResult = await supabase.from('payments').update(payload).eq('id', payment.id).select().single();
+    } else {
+      paymentResult = await supabase.from('payments').insert(payload).select().single();
+    }
+
     setPaying(false);
-    if (payErr) {
-      setError(payErr.message);
+    if (paymentResult.error) {
+      setError(paymentResult.error.message);
       return;
     }
-    setPayment(data as Payment);
-    await supabase.from('orders').update({ status: 'processing', updated_at: new Date().toISOString() }).eq('id', order.id);
-    setOrder({ ...order, status: 'processing' });
+
+    setPayment(paymentResult.data as Payment);
     await supabase.from('notifications').insert({
       user_id: profile.id,
-      title: 'Payment successful',
-      message: `Payment of ${formatCurrency(Number(order.total_amount))} for "${order.title}" was processed.`,
+      title: 'Payment details submitted',
+      message: `Your payment details for "${order.title}" were submitted and are awaiting admin approval.`,
       type: 'payment',
-      meta: { payment_id: data.id },
+      meta: { payment_id: paymentResult.data.id },
     });
   };
 
@@ -140,7 +144,6 @@ export default function OrderDetail() {
         </div>
       )}
 
-      {/* Status tracker */}
       <Card className="p-6">
         {isCancelled ? (
           <div className="flex items-center gap-3 text-red-600">
@@ -172,7 +175,6 @@ export default function OrderDetail() {
         )}
       </Card>
 
-      {/* Order info */}
       <Card className="p-6 space-y-3">
         <h2 className="font-semibold text-slate-900">Order details</h2>
         {order.description && <p className="text-sm text-slate-600">{order.description}</p>}
@@ -187,9 +189,8 @@ export default function OrderDetail() {
         </div>
       </Card>
 
-      {/* Payment */}
       <Card className="p-6">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
           <div className="flex items-center gap-3">
             <div className="h-10 w-10 rounded-xl bg-purple-50 flex items-center justify-center">
               <CreditCard className="h-5 w-5 text-purple-600" />
@@ -197,32 +198,34 @@ export default function OrderDetail() {
             <div>
               <h2 className="font-semibold text-slate-900">Payment</h2>
               {payment ? (
-                <p className="text-sm text-slate-500">Transaction: {payment.transaction_id}</p>
+                <p className="text-sm text-slate-500">Reference: {payment.transaction_id}</p>
               ) : (
-                <p className="text-sm text-slate-500">Pay with mock card</p>
+                <p className="text-sm text-slate-500">Submit your payment reference for admin review</p>
               )}
             </div>
           </div>
-          {payment ? (
-            <Badge color={statusColors[payment.status]}>{payment.status}</Badge>
-          ) : (
-            <div className="flex flex-col gap-3 w-full md:w-auto">
-              <Input
-                label="Payment number"
-                value={paymentRef}
-                onChange={setPaymentRef}
-                placeholder="Enter your payment reference"
-                required
-              />
-              <Button onClick={handlePay} disabled={paying || !paymentRef.trim()} variant="success">
-                {paying ? 'Processing…' : `Pay ${formatCurrency(Number(order.total_amount))}`}
-              </Button>
-            </div>
-          )}
+          <div className="w-full md:w-auto">
+            {payment?.status === 'paid' ? (
+              <Badge color="green">paid</Badge>
+            ) : (
+              <div className="flex flex-col gap-3">
+                <Input
+                  label="Payment reference"
+                  value={paymentRef}
+                  onChange={setPaymentRef}
+                  placeholder="Enter your payment reference"
+                  required
+                />
+                <Button onClick={handlePay} disabled={paying || !paymentRef.trim()} variant="success">
+                  {paying ? 'Submitting…' : 'Submit payment details'}
+                </Button>
+                {payment && <p className="text-xs text-amber-600">Payment is currently awaiting admin approval.</p>}
+              </div>
+            )}
+          </div>
         </div>
       </Card>
 
-      {/* File upload */}
       <Card className="p-6">
         <h2 className="font-semibold text-slate-900 mb-4">Files & Uploads</h2>
         <label className="block">

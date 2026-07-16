@@ -1,74 +1,96 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { AlertCircle, ArrowLeft, Check } from 'lucide-react';
+import { AlertCircle, ArrowLeft, Check, Camera, PackageCheck, Truck, BadgeCheck } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { supabase, Service } from '../lib/supabase';
-import { Card, Button, Input, Textarea, Select, Spinner, formatCurrency } from '../components/ui';
+import { supabase } from '../lib/supabase';
+import { formatCurrency } from '../components/ui';
+
+const frameSizes = [
+  { value: 'A5', label: 'A5 - Tsh 8,000', price: 8000 },
+  { value: 'A4', label: 'A4 - Tsh 10,000', price: 10000 },
+  { value: 'A3', label: 'A3 - Tsh 20,000', price: 20000 },
+  { value: 'A2', label: 'A2 - Tsh 60,000', price: 60000 },
+  { value: 'A1', label: 'A1 - Tsh 100,000', price: 100000 },
+];
+
+const frameDesigns = [
+  'Classic Black',
+  'Classic White',
+  'Golden Frame',
+  'Brown Wooden Frame',
+  'Modern Luxury Frame',
+];
+
+const deliveryOptions = ['Motorcycle Delivery', 'Bus Parcel', 'Courier Service', 'Customer Pickup'];
 
 export default function NewOrder() {
   const { profile } = useAuth();
   const navigate = useNavigate();
-  const [services, setServices] = useState<Service[]>([]);
-  const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
 
-  const [title, setTitle] = useState('');
-  const [serviceId, setServiceId] = useState('');
-  const [description, setDescription] = useState('');
-  const [notes, setNotes] = useState('');
+  const [fullName, setFullName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [address, setAddress] = useState('');
+  const [photoFileName, setPhotoFileName] = useState('');
+  const [frameSize, setFrameSize] = useState('A4');
+  const [frameDesign, setFrameDesign] = useState('Brown Wooden Frame');
+  const [receiptFileName, setReceiptFileName] = useState('');
+  const [deliveryOption, setDeliveryOption] = useState('Motorcycle Delivery');
+  const [instructions, setInstructions] = useState('');
 
-  useEffect(() => {
-    (async () => {
-      const { data } = await supabase
-        .from('services')
-        .select('*')
-        .eq('is_active', true)
-        .in('category', ['printing', 'branding'])
-        .order('name');
-      setServices(data ?? []);
-      setLoading(false);
-    })();
-  }, []);
-
-  const selectedSvc = services.find((s) => s.id === serviceId);
+  const selectedSize = frameSizes.find((size) => size.value === frameSize);
+  const totalAmount = selectedSize?.price ?? 0;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!profile || !selectedSvc) return;
+    if (!profile) return;
+
     setError('');
     setSubmitting(true);
+
+    const description = [
+      `Customer: ${fullName}`,
+      `Phone: ${phone}`,
+      `Address: ${address}`,
+      `Frame size: ${selectedSize?.label ?? frameSize}`,
+      `Design: ${frameDesign}`,
+      `Delivery: ${deliveryOption}`,
+      `Photo file: ${photoFileName || 'No file selected'}`,
+      `Receipt file: ${receiptFileName || 'No receipt selected'}`,
+    ].join(' | ');
+
     const { data, error: insertError } = await supabase
       .from('orders')
       .insert({
         user_id: profile.id,
-        service_id: selectedSvc.id,
-        title,
+        title: 'Wooden Frame Order',
         description,
-        notes,
-        total_amount: selectedSvc.price,
+        notes: instructions || 'No additional instructions.',
+        total_amount: totalAmount,
         status: 'pending',
       })
       .select()
       .single();
+
     setSubmitting(false);
     if (insertError) {
       setError(insertError.message);
       return;
     }
+
     await supabase.from('notifications').insert({
       user_id: profile.id,
-      title: 'Order placed',
-      message: `Your order "${title}" has been placed successfully.`,
+      title: 'Wooden frame order placed',
+      message: `Your wooden frame order for ${fullName} has been received.`,
       type: 'order',
       meta: { order_id: data.id },
     });
+
     setSuccess(true);
     setTimeout(() => navigate(`/app/orders/${data.id}`), 1200);
   };
-
-  if (loading) return <Spinner />;
 
   if (success) {
     return (
@@ -83,48 +105,161 @@ export default function NewOrder() {
   }
 
   return (
-    <div className="max-w-2xl mx-auto space-y-6">
+    <div className="mx-auto max-w-5xl py-6">
       <Link to="/app/orders" className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-900">
         <ArrowLeft className="h-4 w-4" /> Back to orders
       </Link>
-      <div>
-        <h1 className="text-2xl font-bold text-slate-900">New Order</h1>
-        <p className="text-sm text-slate-500 mt-1">Place a printing or branding order</p>
-      </div>
 
-      {error && (
-        <div className="flex items-start gap-2 rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
-          <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
-          <span>{error}</span>
+      <div className="mt-4 rounded-3xl border border-slate-200/80 bg-white p-6 shadow-soft sm:p-8 lg:p-10">
+        <div className="mb-8 text-center">
+          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-blue-100 text-blue-700">
+            <PackageCheck className="h-7 w-7" />
+          </div>
+          <h1 className="text-3xl font-bold text-blue-700">WOODEN FRAME ORDER</h1>
+          <p className="mt-2 text-sm text-slate-600">Premium wooden framing service for your favorite photo, crafted and delivered with care.</p>
         </div>
-      )}
 
-      <Card className="p-6">
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <Input label="Order title" value={title} onChange={setTitle} placeholder="e.g. 500 Business Cards" required />
-          <Select
-            label="Service"
-            value={serviceId}
-            onChange={setServiceId}
-            placeholder="Select a service"
-            options={services.map((s) => ({ value: s.id, label: `${s.name} — ${formatCurrency(s.price)}` }))}
-          />
-          {selectedSvc && (
-            <div className="rounded-xl bg-slate-50 p-3 text-sm text-slate-600">{selectedSvc.description}</div>
-          )}
-          <Textarea label="Description" value={description} onChange={setDescription} placeholder="Describe what you need…" rows={3} />
-          <Textarea label="Notes" value={notes} onChange={setNotes} placeholder="Any special instructions…" rows={2} />
-
-          {selectedSvc && (
-            <div className="flex items-center justify-between rounded-xl bg-slate-50 p-4">
-              <span className="text-sm text-slate-600">Total: <strong className="text-slate-900">{formatCurrency(selectedSvc.price)}</strong></span>
-              <Button type="submit" disabled={submitting}>
-                {submitting ? 'Placing order…' : 'Place order'}
-              </Button>
+        <div className="mb-8 rounded-2xl border border-amber-200 bg-amber-50 p-4">
+          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+            <div>
+              <p className="text-sm font-semibold text-amber-800">Service provided</p>
+              <p className="text-lg font-bold text-slate-900">Wooden frame crafting and delivery</p>
+              <p className="text-sm text-slate-600">We help you turn your photo into a beautiful wooden frame order with delivery support.</p>
             </div>
-          )}
+            <div className="rounded-xl bg-white px-3 py-2 text-sm font-semibold text-slate-900">
+              From {formatCurrency(8000)}
+            </div>
+          </div>
+        </div>
+
+        {error && (
+          <div className="mb-6 flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>{error}</span>
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit} className="space-y-8">
+          <div className="grid gap-5 md:grid-cols-2">
+            <label className="block">
+              <span className="mb-2 block text-sm font-semibold text-slate-700">Full Name</span>
+              <input type="text" value={fullName} onChange={(e) => setFullName(e.target.value)} required className="w-full rounded-xl border border-slate-300 p-3 text-sm text-slate-900 outline-none transition focus:border-blue-600 focus:ring-2 focus:ring-blue-100" />
+            </label>
+            <label className="block">
+              <span className="mb-2 block text-sm font-semibold text-slate-700">Phone Number</span>
+              <input type="text" value={phone} onChange={(e) => setPhone(e.target.value)} required className="w-full rounded-xl border border-slate-300 p-3 text-sm text-slate-900 outline-none transition focus:border-blue-600 focus:ring-2 focus:ring-blue-100" />
+            </label>
+            <label className="block md:col-span-2">
+              <span className="mb-2 block text-sm font-semibold text-slate-700">Delivery Address</span>
+              <textarea value={address} onChange={(e) => setAddress(e.target.value)} rows={3} required className="w-full rounded-xl border border-slate-300 p-3 text-sm text-slate-900 outline-none transition focus:border-blue-600 focus:ring-2 focus:ring-blue-100" />
+            </label>
+          </div>
+
+          <hr className="border-slate-200" />
+
+          <section>
+            <div className="mb-3 flex items-center gap-2">
+              <Camera className="h-5 w-5 text-blue-600" />
+              <h2 className="text-xl font-bold text-blue-600">Upload Your Photo</h2>
+            </div>
+            <input type="file" onChange={(e) => setPhotoFileName(e.target.files?.[0]?.name ?? '')} className="w-full rounded-xl border border-slate-300 p-3 text-sm" />
+          </section>
+
+          <hr className="border-slate-200" />
+
+          <section>
+            <h2 className="mb-3 text-xl font-bold text-blue-600">Choose Frame Size</h2>
+            <select value={frameSize} onChange={(e) => setFrameSize(e.target.value)} className="w-full rounded-xl border border-slate-300 p-3 text-sm text-slate-900 outline-none transition focus:border-blue-600 focus:ring-2 focus:ring-blue-100">
+              {frameSizes.map((size) => (
+                <option key={size.value} value={size.value}>{size.label}</option>
+              ))}
+            </select>
+          </section>
+
+          <hr className="border-slate-200" />
+
+          <section>
+            <h2 className="mb-3 text-xl font-bold text-blue-600">Choose Frame Design</h2>
+            <select value={frameDesign} onChange={(e) => setFrameDesign(e.target.value)} className="w-full rounded-xl border border-slate-300 p-3 text-sm text-slate-900 outline-none transition focus:border-blue-600 focus:ring-2 focus:ring-blue-100">
+              {frameDesigns.map((design) => (
+                <option key={design} value={design}>{design}</option>
+              ))}
+            </select>
+          </section>
+
+          <hr className="border-slate-200" />
+
+          <section>
+            <h2 className="mb-5 text-xl font-bold text-blue-600">Payment Details</h2>
+            <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5">
+              <h3 className="mb-3 font-bold text-emerald-700">Mobile Money</h3>
+              <p className="text-sm font-semibold text-slate-700">LIPA NUMBER (Vodacom)</p>
+              <p className="text-sm">354112841</p>
+              <p className="mt-2 text-sm">Name: <span className="font-semibold text-slate-900">SAMSON YOHANA MAGAWA</span></p>
+              <div className="mt-4">
+                <p className="text-sm font-semibold text-slate-700">M-PESA ACCOUNT</p>
+                <p className="text-sm">0793914556</p>
+                <p className="mt-2 text-sm">Name: <span className="font-semibold text-slate-900">SAMSON YOHANA MAGAWA</span></p>
+              </div>
+              <div className="mt-4">
+                <h3 className="font-bold text-blue-700">CRDB BANK</h3>
+                <p className="text-sm">Account Number:</p>
+                <p className="text-sm font-semibold text-slate-900">0152932474800</p>
+                <p className="mt-2 text-sm">Name:</p>
+                <p className="text-sm font-semibold text-slate-900">SAMSON YOHANA MAGAWA</p>
+              </div>
+            </div>
+
+            <div className="mt-5">
+              <label className="block text-sm font-semibold text-slate-700">
+                Upload Payment Receipt
+              </label>
+              <input type="file" onChange={(e) => setReceiptFileName(e.target.files?.[0]?.name ?? '')} className="mt-2 w-full rounded-xl border border-slate-300 p-3 text-sm" />
+            </div>
+          </section>
+
+          <hr className="border-slate-200" />
+
+          <section>
+            <div className="mb-3 flex items-center gap-2">
+              <Truck className="h-5 w-5 text-blue-600" />
+              <h2 className="text-xl font-bold text-blue-600">Delivery Option</h2>
+            </div>
+            <select value={deliveryOption} onChange={(e) => setDeliveryOption(e.target.value)} className="w-full rounded-xl border border-slate-300 p-3 text-sm text-slate-900 outline-none transition focus:border-blue-600 focus:ring-2 focus:ring-blue-100">
+              {deliveryOptions.map((option) => (
+                <option key={option} value={option}>{option}</option>
+              ))}
+            </select>
+
+            <div className="mt-5">
+              <label className="block text-sm font-semibold text-slate-700">Additional Instructions</label>
+              <textarea value={instructions} onChange={(e) => setInstructions(e.target.value)} rows={4} placeholder="Write your instructions here..." className="mt-2 w-full rounded-xl border border-slate-300 p-3 text-sm text-slate-900 outline-none transition focus:border-blue-600 focus:ring-2 focus:ring-blue-100" />
+            </div>
+          </section>
+
+          <hr className="border-slate-200" />
+
+          <div className="rounded-2xl border border-blue-100 bg-blue-50 p-5">
+            <div className="flex items-center gap-2">
+              <BadgeCheck className="h-5 w-5 text-blue-700" />
+              <h2 className="text-lg font-bold text-blue-700">After Payment</h2>
+            </div>
+            <p className="mt-3 text-sm text-slate-700">
+              After confirming your payment, one of our staff members will contact you to confirm your order, discuss the design if necessary, and arrange delivery of your completed wooden frame.
+            </p>
+          </div>
+
+          <div className="flex flex-col gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-sm text-slate-500">Estimated service total</p>
+              <p className="text-lg font-semibold text-slate-900">{formatCurrency(totalAmount)}</p>
+            </div>
+            <button type="submit" disabled={submitting} className="rounded-xl bg-blue-700 px-6 py-3 text-lg font-semibold text-white transition hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-60">
+              {submitting ? 'Submitting order…' : 'Submit Order'}
+            </button>
+          </div>
         </form>
-      </Card>
+      </div>
     </div>
   );
 }
